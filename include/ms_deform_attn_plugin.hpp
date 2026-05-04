@@ -1,52 +1,85 @@
 #pragma once
 
-#include <NvInferRuntimePlugin.h>
 #include <NvInferRuntime.h>
+#include <NvInferRuntimePlugin.h>
 
 #include <string>
 #include <vector>
 
 namespace liteany {
 
-// Fused NV12 -> normalised RGB plugin (IPluginV3).
-//
-// Input  : float [B, H_NV12, W_IN] containing NV12 byte values
-//          with H_NV12 = H_IN * 3 / 2
-// Output : fp16 (or fp32) [B, 3, H_OUT, W_OUT]
-//
-// mode 0: legacy full-range BT.601, output in [-1, 1]
-// mode 1: D-FINE export-compatible limited-range BT.601, output in [0, 1]
-
-void launchNv12Decode(
-    const void* nv12,
+void launchMSDeformAttn(
+    const void* value0,
+    const void* value1,
+    const void* value2,
+    const void* grid0,
+    const void* grid1,
+    const void* grid2,
+    const void* weights,
     void* output,
-    int H_IN,
-    int W_IN,
-    int H_OUT,
-    int W_OUT,
-    int mode,
-    nvinfer1::DataType outDtype,
+    int BH,
+    int C,
+    int Q,
+    int H0,
+    int W0,
+    int H1,
+    int W1,
+    int H2,
+    int W2,
+    int numHeads,
+    nvinfer1::DataType valueDtype,
+    nvinfer1::DataType gridDtype,
+    nvinfer1::DataType weightDtype,
     cudaStream_t stream);
 
-class Nv12DecodePlugin final : public nvinfer1::IPluginV3,
-                               public nvinfer1::IPluginV3OneCore,
-                               public nvinfer1::IPluginV3OneBuild,
-                               public nvinfer1::IPluginV3OneRuntime {
-public:
-    Nv12DecodePlugin(int outH, int outW, int mode);
+void launchMSDeformAttnFromLocations(
+    const void* value0,
+    const void* value1,
+    const void* value2,
+    const void* locations,
+    const void* weights,
+    void* output,
+    int B,
+    int C,
+    int Q,
+    int H0,
+    int W0,
+    int H1,
+    int W1,
+    int H2,
+    int W2,
+    int numHeads,
+    nvinfer1::DataType dtype,
+    cudaStream_t stream);
 
-    // ---- IPluginV3 ----
+void launchMSDeformAttnFlat(
+    const void* value,
+    const void* locations,
+    const void* weights,
+    void* output,
+    int B,
+    int C,
+    int Q,
+    int numHeads,
+    nvinfer1::DataType dtype,
+    cudaStream_t stream);
+
+class MSDeformAttnPlugin final : public nvinfer1::IPluginV3,
+                                 public nvinfer1::IPluginV3OneCore,
+                                 public nvinfer1::IPluginV3OneBuild,
+                                 public nvinfer1::IPluginV3OneRuntime {
+public:
+    MSDeformAttnPlugin(int numHeads, int p0, int p1, int p2);
+
     nvinfer1::IPluginCapability* getCapabilityInterface(
         nvinfer1::PluginCapabilityType type) noexcept override;
     nvinfer1::IPluginV3* clone() noexcept override;
 
-    // ---- IPluginV3OneCore ----
     nvinfer1::AsciiChar const* getPluginName() const noexcept override;
     nvinfer1::AsciiChar const* getPluginVersion() const noexcept override;
     nvinfer1::AsciiChar const* getPluginNamespace() const noexcept override;
     void setPluginNamespace(const char* ns) noexcept;
 
-    // ---- IPluginV3OneBuild ----
     int32_t getNbOutputs() const noexcept override { return 1; }
 
     int32_t configurePlugin(
@@ -76,12 +109,11 @@ public:
         int32_t nbInputs,
         int32_t nbOutputs) noexcept override;
 
-    // ---- IPluginV3OneRuntime ----
     int32_t onShapeChange(
         nvinfer1::PluginTensorDesc const* in,
         int32_t nbInputs,
         nvinfer1::PluginTensorDesc const* out,
-        int32_t nbOutputs) noexcept override { return 0; }
+        int32_t nbOutputs) noexcept override;
 
     int32_t enqueue(
         nvinfer1::PluginTensorDesc const* inputDesc,
@@ -97,18 +129,19 @@ public:
     nvinfer1::PluginFieldCollection const* getFieldsToSerialize() noexcept override;
 
 private:
-    int mOutH;
-    int mOutW;
-    int mMode;
+    int mNumHeads;
+    int mP0;
+    int mP1;
+    int mP2;
     std::string mNamespace;
 
     nvinfer1::PluginFieldCollection mFCToSerialize{};
     std::vector<nvinfer1::PluginField> mDataToSerialize;
 };
 
-class Nv12DecodePluginCreator final : public nvinfer1::IPluginCreatorV3One {
+class MSDeformAttnPluginCreator final : public nvinfer1::IPluginCreatorV3One {
 public:
-    Nv12DecodePluginCreator();
+    MSDeformAttnPluginCreator();
 
     nvinfer1::AsciiChar const* getPluginName() const noexcept override;
     nvinfer1::AsciiChar const* getPluginVersion() const noexcept override;

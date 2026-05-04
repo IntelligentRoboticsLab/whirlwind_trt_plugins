@@ -95,7 +95,7 @@ __device__ __forceinline__ __half floatToOut<__half>(float v) {
 // One thread per output (y_out, x_out). Writes all 3 channels.
 // ---------------------------------------------------------------------------
 template <typename T>
-__global__ void nv12DecodeKernel(
+__global__ void nv12DecodeLegacyKernel(
     const float* __restrict__ nv12,
     T* __restrict__ output,
     int H_IN,
@@ -146,6 +146,86 @@ __global__ void nv12DecodeKernel(
     output[idx + 2 * chStride]  = floatToOut<T>(B);
 }
 
+__device__ __forceinline__ float clamp255(float v)
+{
+    return fminf(255.0f, fmaxf(0.0f, v));
+}
+
+__device__ __forceinline__ float3 nv12FullResRgbLimited(
+    const float* __restrict__ nv12,
+    int H_IN,
+    int W_IN,
+    int y,
+    int x)
+{
+    y = max(0, min(H_IN - 1, y));
+    x = max(0, min(W_IN - 1, x));
+
+    const float Y = nv12[y * W_IN + x];
+    const float* chroma = nv12 + H_IN * W_IN;
+    const int uvY = y >> 1;
+    const int uvX = x >> 1;
+    const float U = chroma[uvY * W_IN + 2 * uvX] - 128.0f;
+    const float V = chroma[uvY * W_IN + 2 * uvX + 1] - 128.0f;
+
+    const float Yp = 1.164f * (Y - 16.0f);
+    return make_float3(
+        clamp255(Yp + 1.596f * V),
+        clamp255(Yp - 0.813f * V - 0.391f * U),
+        clamp255(Yp + 2.018f * U));
+}
+
+// D-FINE ONNX preprocessing equivalent:
+//   U/V nearest upsample to full NV12 size, limited-range BT.601 RGB,
+//   clamp [0,255], bilinear resize RGB with align_corners=False, divide by 255.
+template <typename T>
+__global__ void nv12DecodeDfineKernel(
+    const float* __restrict__ nv12,
+    T* __restrict__ output,
+    int H_IN,
+    int W_IN,
+    int H_OUT,
+    int W_OUT,
+    float scale_y_h,
+    float scale_y_w)
+{
+    const int x_out = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y_out = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x_out >= W_OUT || y_out >= H_OUT) return;
+
+    const float yf = (static_cast<float>(y_out) + 0.5f) * scale_y_h - 0.5f;
+    const float xf = (static_cast<float>(x_out) + 0.5f) * scale_y_w - 0.5f;
+
+    const int y0 = static_cast<int>(floorf(yf));
+    const int x0 = static_cast<int>(floorf(xf));
+    const int y1 = y0 + 1;
+    const int x1 = x0 + 1;
+
+    const float wy1 = yf - static_cast<float>(y0);
+    const float wy0 = 1.0f - wy1;
+    const float wx1 = xf - static_cast<float>(x0);
+    const float wx0 = 1.0f - wx1;
+
+    const float3 c00 = nv12FullResRgbLimited(nv12, H_IN, W_IN, y0, x0);
+    const float3 c01 = nv12FullResRgbLimited(nv12, H_IN, W_IN, y0, x1);
+    const float3 c10 = nv12FullResRgbLimited(nv12, H_IN, W_IN, y1, x0);
+    const float3 c11 = nv12FullResRgbLimited(nv12, H_IN, W_IN, y1, x1);
+
+    constexpr float inv255 = 1.0f / 255.0f;
+    const float R = inv255 * (wy0 * (wx0 * c00.x + wx1 * c01.x)
+                            + wy1 * (wx0 * c10.x + wx1 * c11.x));
+    const float G = inv255 * (wy0 * (wx0 * c00.y + wx1 * c01.y)
+                            + wy1 * (wx0 * c10.y + wx1 * c11.y));
+    const float B = inv255 * (wy0 * (wx0 * c00.z + wx1 * c01.z)
+                            + wy1 * (wx0 * c10.z + wx1 * c11.z));
+
+    const int idx = y_out * W_OUT + x_out;
+    const int chStride = H_OUT * W_OUT;
+    output[idx]                 = floatToOut<T>(R);
+    output[idx + chStride]      = floatToOut<T>(G);
+    output[idx + 2 * chStride]  = floatToOut<T>(B);
+}
+
 // ---------------------------------------------------------------------------
 // Dispatcher.
 // ---------------------------------------------------------------------------
@@ -156,6 +236,7 @@ void launchNv12Decode(
     int W_IN,
     int H_OUT,
     int W_OUT,
+    int mode,
     nvinfer1::DataType outDtype,
     cudaStream_t stream)
 {
@@ -170,14 +251,31 @@ void launchNv12Decode(
     const float scale_uv_h = static_cast<float>(H_IN >> 1) / static_cast<float>(H_OUT);
     const float scale_uv_w = static_cast<float>(W_IN >> 1) / static_cast<float>(W_OUT);
 
+    if (mode == 1) {
+        if (outDtype == nvinfer1::DataType::kHALF) {
+            nv12DecodeDfineKernel<__half><<<grid, block, 0, stream>>>(
+                static_cast<const float*>(nv12),
+                static_cast<__half*>(output),
+                H_IN, W_IN, H_OUT, W_OUT,
+                scale_y_h, scale_y_w);
+        } else {
+            nv12DecodeDfineKernel<float><<<grid, block, 0, stream>>>(
+                static_cast<const float*>(nv12),
+                static_cast<float*>(output),
+                H_IN, W_IN, H_OUT, W_OUT,
+                scale_y_h, scale_y_w);
+        }
+        return;
+    }
+
     if (outDtype == nvinfer1::DataType::kHALF) {
-        nv12DecodeKernel<__half><<<grid, block, 0, stream>>>(
+        nv12DecodeLegacyKernel<__half><<<grid, block, 0, stream>>>(
             static_cast<const float*>(nv12),
             static_cast<__half*>(output),
             H_IN, W_IN, H_OUT, W_OUT,
             scale_y_h, scale_y_w, scale_uv_h, scale_uv_w);
     } else {
-        nv12DecodeKernel<float><<<grid, block, 0, stream>>>(
+        nv12DecodeLegacyKernel<float><<<grid, block, 0, stream>>>(
             static_cast<const float*>(nv12),
             static_cast<float*>(output),
             H_IN, W_IN, H_OUT, W_OUT,
