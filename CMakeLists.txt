@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(liteany_trt_plugins LANGUAGES CXX CUDA)
+project(ww_trt_plugins LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
@@ -24,7 +24,7 @@ include_directories(
 
 link_directories(${TENSORRT_LIB_DIR})
 
-add_library(corr_volume_plugin SHARED
+add_library(ww_trt_plugins SHARED
     src/corr_volume_plugin.cpp
     src/corr_volume_kernel.cu
     src/nv12_decode_plugin.cpp
@@ -32,11 +32,11 @@ add_library(corr_volume_plugin SHARED
     src/plugin_register.cpp
 )
 
-target_link_libraries(corr_volume_plugin
+target_link_libraries(ww_trt_plugins
     nvinfer
     cudart
 )
 
-set_target_properties(corr_volume_plugin PROPERTIES
+set_target_properties(ww_trt_plugins PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
 )

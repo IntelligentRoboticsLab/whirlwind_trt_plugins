@@ -11,13 +11,7 @@ cuda = "12.0"
 
 [dependencies]
 cmake = ">=3.24"
-ninja = "*"
 pkg-config = "*"
-
-# Compilers / toolchain
-cxx-compiler = "*"
-cuda-nvcc = "*"
-cuda-cudart-dev = "*"
 
 # Optional but useful
 python = ">=3.10"
@@ -25,9 +19,13 @@ numpy = "*"
 
 [tasks]
 configure = """
-cmake -S . -B build -G Ninja \
+env -u CC -u CXX -u LD CUDAHOSTCXX=/usr/bin/c++ \
+cmake -S . -B build -G "Unix Makefiles" \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -DCMAKE_CXX_COMPILER=/usr/bin/c++ \
+  -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
+  -DCUDAToolkit_ROOT=/usr/local/cuda
 """
 
 build = { cmd = "cmake --build build -j", depends-on = ["configure"] }
