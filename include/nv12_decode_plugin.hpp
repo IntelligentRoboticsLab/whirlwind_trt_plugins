@@ -10,12 +10,14 @@ namespace liteany {
 
 // Fused NV12 -> normalised RGB plugin (IPluginV3).
 //
-// Input  : float [B, H_NV12, W_IN] containing NV12 byte values
-//          with H_NV12 = H_IN * 3 / 2
-// Output : fp16 (or fp32) [B, 3, H_OUT, W_OUT]
+// Input  : int8 [B, H_NV12, W_IN] — bytes are NV12 *uint8* values, but
+//          TRT's IPluginV3 I/O layer does not expose UINT8 as a datatype, so
+//          the network declares them as INT8 and we reinterpret to uint8 in
+//          the kernel. (signed-int8 == uint8 at the byte level.)
+//          H_NV12 = H_IN * 3 / 2.
+// Output : fp16 or fp32 [B, 3, H_OUT, W_OUT] in [-1, 1].
 //
-// mode 0: legacy full-range BT.601, output in [-1, 1]
-// mode 1: D-FINE export-compatible limited-range BT.601, output in [0, 1]
+// Normalisation: full-range BT.601 YCbCr -> RGB, fused with `2*(rgb/255) - 1`.
 
 void launchNv12Decode(
     const void* nv12,
@@ -24,7 +26,6 @@ void launchNv12Decode(
     int W_IN,
     int H_OUT,
     int W_OUT,
-    int mode,
     nvinfer1::DataType outDtype,
     cudaStream_t stream);
 
@@ -33,7 +34,7 @@ class Nv12DecodePlugin final : public nvinfer1::IPluginV3,
                                public nvinfer1::IPluginV3OneBuild,
                                public nvinfer1::IPluginV3OneRuntime {
 public:
-    Nv12DecodePlugin(int outH, int outW, int mode);
+    Nv12DecodePlugin(int outH, int outW);
 
     // ---- IPluginV3 ----
     nvinfer1::IPluginCapability* getCapabilityInterface(
@@ -99,7 +100,6 @@ public:
 private:
     int mOutH;
     int mOutW;
-    int mMode;
     std::string mNamespace;
 
     nvinfer1::PluginFieldCollection mFCToSerialize{};

@@ -113,8 +113,10 @@ bool CorrVolumePlugin::supportsFormatCombination(
     if (desc.format != nvinfer1::TensorFormat::kLINEAR) return false;
 
     if (pos == 0) {
-        return desc.type == nvinfer1::DataType::kHALF
-            || desc.type == nvinfer1::DataType::kFLOAT;
+        // FP16 only: the fast-path kernel is FP16, and advertising FP32
+        // here lets TRT insert a Half->Float reformat upstream, bypassing
+        // it entirely.
+        return desc.type == nvinfer1::DataType::kHALF;
     }
 
     // Other inputs and the output must match input 0.

@@ -27,6 +27,8 @@ link_directories(${TENSORRT_LIB_DIR})
 add_library(ww_trt_plugins SHARED
     src/corr_volume_plugin.cpp
     src/corr_volume_kernel.cu
+    src/cost_stem_3d_plugin.cpp
+    src/cost_stem_3d_kernel.cu
     src/ms_deform_attn_plugin.cpp
     src/ms_deform_attn_kernel.cu
     src/nv12_decode_plugin.cpp

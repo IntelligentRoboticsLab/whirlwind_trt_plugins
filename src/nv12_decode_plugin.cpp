@@ -12,8 +12,8 @@ static constexpr char PLUGIN_VERSION[] = "1";
 // Nv12DecodePlugin
 // ---------------------------------------------------------------------------
 
-Nv12DecodePlugin::Nv12DecodePlugin(int outH, int outW, int mode)
-    : mOutH(outH), mOutW(outW), mMode(mode)
+Nv12DecodePlugin::Nv12DecodePlugin(int outH, int outW)
+    : mOutH(outH), mOutW(outW)
 {
 }
 
@@ -33,7 +33,7 @@ nvinfer1::IPluginCapability* Nv12DecodePlugin::getCapabilityInterface(
 
 nvinfer1::IPluginV3* Nv12DecodePlugin::clone() noexcept
 {
-    auto* p = new Nv12DecodePlugin(mOutH, mOutW, mMode);
+    auto* p = new Nv12DecodePlugin(mOutH, mOutW);
     p->setPluginNamespace(mNamespace.c_str());
     return p;
 }
@@ -74,9 +74,10 @@ int32_t Nv12DecodePlugin::getOutputDataTypes(
     int32_t /*nbInputs*/) const noexcept
 {
     if (nbOutputs < 1) return 1;
-    // Output fp32 to match the original decode dtype expected by the parser
-    // (InstanceNorm scale/bias constants in the ONNX are fp32). In --fp16
-    // builds TRT folds this into the fp16 path with at most one reformat.
+    // Declare fp32 so the ONNX parser keeps the downstream graph type-
+    // consistent (InstanceNorm scale/bias are fp32 initialisers). TRT will
+    // still pick fp16 at build time via supportsFormatCombination — the
+    // declared type is only used for graph-validity checks.
     outputTypes[0] = nvinfer1::DataType::kFLOAT;
     return 0;
 }
@@ -116,7 +117,13 @@ bool Nv12DecodePlugin::supportsFormatCombination(
     if (desc.format != nvinfer1::TensorFormat::kLINEAR) return false;
 
     if (pos == 0) {
-        return desc.type == nvinfer1::DataType::kFLOAT;
+        // INT8-only: the network input bytes are raw uint8 NV12 values; we
+        // accept INT8 here and reinterpret to uint8_t in the kernel.
+        // Refusing fp32 prevents TRT from silently inserting a
+        // copyVectorizedKernel<signed char, float> cast that would
+        // (a) cost ~1.8 µs/eye and (b) sign-extend values >127.
+        // (kUINT8 is not a supported PluginV3 I/O datatype.)
+        return desc.type == nvinfer1::DataType::kINT8;
     }
     return desc.type == nvinfer1::DataType::kHALF
         || desc.type == nvinfer1::DataType::kFLOAT;
@@ -140,7 +147,6 @@ int32_t Nv12DecodePlugin::enqueue(
     launchNv12Decode(
         inputs[0], outputs[0],
         H_IN, W_IN, mOutH, mOutW,
-        mMode,
         outputDesc[0].type, stream);
     return 0;
 }
@@ -160,9 +166,6 @@ nvinfer1::PluginFieldCollection const* Nv12DecodePlugin::getFieldsToSerialize() 
     mDataToSerialize.emplace_back(
         nvinfer1::PluginField{
             "out_w", &mOutW, nvinfer1::PluginFieldType::kINT32, 1});
-    mDataToSerialize.emplace_back(
-        nvinfer1::PluginField{
-            "mode", &mMode, nvinfer1::PluginFieldType::kINT32, 1});
     mFCToSerialize.nbFields = static_cast<int32_t>(mDataToSerialize.size());
     mFCToSerialize.fields = mDataToSerialize.data();
     return &mFCToSerialize;
@@ -180,9 +183,6 @@ Nv12DecodePluginCreator::Nv12DecodePluginCreator()
     mFields.emplace_back(
         nvinfer1::PluginField{
             "out_w", nullptr, nvinfer1::PluginFieldType::kINT32, 1});
-    mFields.emplace_back(
-        nvinfer1::PluginField{
-            "mode", nullptr, nvinfer1::PluginFieldType::kINT32, 1});
     mFC.nbFields = static_cast<int32_t>(mFields.size());
     mFC.fields = mFields.data();
 }
@@ -214,7 +214,6 @@ nvinfer1::IPluginV3* Nv12DecodePluginCreator::createPlugin(
 {
     int outH = 224;
     int outW = 288;
-    int mode = 0;
     if (fc != nullptr) {
         for (int32_t i = 0; i < fc->nbFields; ++i) {
             const auto& f = fc->fields[i];
@@ -223,12 +222,10 @@ nvinfer1::IPluginV3* Nv12DecodePluginCreator::createPlugin(
                 outH = *static_cast<const int*>(f.data);
             } else if (std::strcmp(f.name, "out_w") == 0) {
                 outW = *static_cast<const int*>(f.data);
-            } else if (std::strcmp(f.name, "mode") == 0) {
-                mode = *static_cast<const int*>(f.data);
             }
         }
     }
-    auto* p = new Nv12DecodePlugin(outH, outW, mode);
+    auto* p = new Nv12DecodePlugin(outH, outW);
     p->setPluginNamespace(mNamespace.c_str());
     return p;
 }
