@@ -16,7 +16,7 @@ inline cudaError_t lastLaunchError(const char* where) noexcept
 {
     const cudaError_t err = cudaPeekAtLastError();
     if (err != cudaSuccess) {
-        std::fprintf(stderr, "[whirlwind] %s: CUDA launch failed: %s\n",
+        std::fprintf(stderr, "[ww_trt_plugins] %s: CUDA launch failed: %s\n",
                      where, cudaGetErrorString(err));
     }
     return err;
