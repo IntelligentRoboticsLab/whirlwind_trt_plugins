@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace liteany {
+namespace whirlwind {
 
 void launchCorrVolume(
     const void* left,
@@ -119,4 +119,4 @@ private:
     std::vector<nvinfer1::PluginField> mFields;
 };
 
-} // namespace liteany
+} // namespace whirlwind

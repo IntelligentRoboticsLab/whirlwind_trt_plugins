@@ -5,10 +5,10 @@
 
 #include <NvInferPlugin.h>
 
-using liteany::CorrVolumePluginCreator;
-using liteany::CostStem3DPluginCreator;
-using liteany::MSDeformAttnPluginCreator;
-using liteany::Nv12DecodePluginCreator;
+using whirlwind::CorrVolumePluginCreator;
+using whirlwind::CostStem3DPluginCreator;
+using whirlwind::MSDeformAttnPluginCreator;
+using whirlwind::Nv12DecodePluginCreator;
 
 // Static registration.
 // This is what lets TensorRT discover the plugins when the .so is loaded.

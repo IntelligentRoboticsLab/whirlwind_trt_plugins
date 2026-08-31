@@ -5,7 +5,7 @@
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 
-namespace liteany {
+namespace whirlwind {
 
 static constexpr char PLUGIN_NAME[] = "CostStem3D";
 static constexpr char PLUGIN_VERSION[] = "1";
@@ -154,4 +154,4 @@ nvinfer1::IPluginV3* CostStem3DPluginCreator::createPlugin(
     return p;
 }
 
-}  // namespace liteany
+}  // namespace whirlwind

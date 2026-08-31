@@ -4,7 +4,7 @@
 #include <cuda_runtime.h>
 #include <NvInfer.h>
 
-namespace liteany {
+namespace whirlwind {
 
 // ---------------------------------------------------------------------------
 // Fused 3-stage 3D Conv (3x3x3, padding 1) kernel.
@@ -264,4 +264,4 @@ void launchCostStem3D(
         B, D, H, W);
 }
 
-}  // namespace liteany
+}  // namespace whirlwind

@@ -3,7 +3,7 @@
 #include <cassert>
 #include <cstring>
 
-namespace liteany {
+namespace whirlwind {
 
 static constexpr char PLUGIN_NAME[] = "Nv12Decode";
 static constexpr char PLUGIN_VERSION[] = "1";
@@ -230,4 +230,4 @@ nvinfer1::IPluginV3* Nv12DecodePluginCreator::createPlugin(
     return p;
 }
 
-} // namespace liteany
+} // namespace whirlwind

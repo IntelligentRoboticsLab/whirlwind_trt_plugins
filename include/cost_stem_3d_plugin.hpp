@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace liteany {
+namespace whirlwind {
 
 // Fused cost_stem_3d plugin. Replaces three (Conv3D 3x3x3 + BN + Clip[0,6])
 // stages running over a [1, 1, 48, 32, 40] cost-volume tensor with a single
@@ -133,4 +133,4 @@ private:
     std::vector<nvinfer1::PluginField> mFields;
 };
 
-}  // namespace liteany
+}  // namespace whirlwind

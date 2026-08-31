@@ -5,7 +5,7 @@
 #include <cstring>
 #include <cstdio>
 
-namespace liteany {
+namespace whirlwind {
 
 static constexpr char PLUGIN_NAME[] = "MSDeformAttn";
 static constexpr char PLUGIN_VERSION[] = "1";
@@ -342,4 +342,4 @@ nvinfer1::IPluginV3* MSDeformAttnPluginCreator::createPlugin(
     return p;
 }
 
-} // namespace liteany
+} // namespace whirlwind

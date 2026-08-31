@@ -4,7 +4,7 @@
 #include <cuda_runtime.h>
 #include <NvInfer.h>
 
-namespace liteany {
+namespace whirlwind {
 
 // ---------------------------------------------------------------------------
 // Naive kernel — one thread per output element (b, d, y, x); inner loop over C.
@@ -53,7 +53,7 @@ __global__ void corrVolumeKernel(
 // Naive-vec FP16 kernel — same parallelism as the naive scalar kernel but
 // loads 8 halves at a time per side via half4 (16 B per LDG.E).
 //
-// Requires C % 8 == 0 (LiteAnyStereo: C=24 always satisfies). Each thread
+// Requires C % 8 == 0. Each thread
 // still computes one (b, d, y, x), but the inner channel loop now does
 // C/8 vector loads instead of C scalar loads, cutting global-memory
 // transactions ~4x and freeing the ALU to issue HFMA2 pairs.
@@ -278,4 +278,4 @@ void launchCorrVolume(
     }
 }
 
-} // namespace liteany
+} // namespace whirlwind

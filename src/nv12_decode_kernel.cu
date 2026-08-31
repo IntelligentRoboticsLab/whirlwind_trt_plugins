@@ -4,10 +4,10 @@
 #include <cuda_runtime.h>
 #include <NvInfer.h>
 
-namespace liteany {
+namespace whirlwind {
 
 // ---------------------------------------------------------------------------
-// NV12 decode + bilinear resize + LiteAnyStereo normalisation.
+// NV12 decode + bilinear resize + normalisation.
 //
 // Input  : uint8 NV12 buffer of size H_NV12 * W_IN, with H_NV12 = H_IN*3/2.
 //          The first H_IN rows are the Y plane; the remaining H_IN/2 rows
@@ -230,4 +230,4 @@ void launchNv12Decode(
     }
 }
 
-} // namespace liteany
+} // namespace whirlwind

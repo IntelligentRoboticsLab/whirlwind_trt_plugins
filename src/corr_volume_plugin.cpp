@@ -3,7 +3,7 @@
 #include <cassert>
 #include <cstring>
 
-namespace liteany {
+namespace whirlwind {
 
 static constexpr char PLUGIN_NAME[] = "CorrVolume";
 static constexpr char PLUGIN_VERSION[] = "1";
@@ -221,4 +221,4 @@ nvinfer1::IPluginV3* CorrVolumePluginCreator::createPlugin(
     return p;
 }
 
-} // namespace liteany
+} // namespace whirlwind

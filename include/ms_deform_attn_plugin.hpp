@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace liteany {
+namespace whirlwind {
 
 void launchMSDeformAttn(
     const void* value0,
@@ -161,4 +161,4 @@ private:
     std::vector<nvinfer1::PluginField> mFields;
 };
 
-} // namespace liteany
+} // namespace whirlwind

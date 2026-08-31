@@ -4,7 +4,7 @@
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 
-namespace liteany {
+namespace whirlwind {
 
 template <typename T>
 __device__ __forceinline__ float loadValue(const T* ptr, int idx)
@@ -566,4 +566,4 @@ void launchMSDeformAttn(
     }
 }
 
-} // namespace liteany
+} // namespace whirlwind

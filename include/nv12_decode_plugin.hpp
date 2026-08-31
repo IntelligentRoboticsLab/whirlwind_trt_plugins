@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace liteany {
+namespace whirlwind {
 
 // Fused NV12 -> normalised RGB plugin (IPluginV3).
 //
@@ -128,4 +128,4 @@ private:
     std::vector<nvinfer1::PluginField> mFields;
 };
 
-} // namespace liteany
+} // namespace whirlwind
