@@ -1,6 +1,6 @@
-#include "ms_deform_attn_plugin.hpp"
+#include "common/cuda_check.hpp"
+#include "plugins/ms_deform_attn/ms_deform_attn_kernel.hpp"
 
-#include <NvInfer.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 
@@ -358,14 +358,17 @@ __global__ void msDeformAttnElementKernel(
     output[idx] = storeValue<TValue>(acc);
 }
 
+// ---------------------------------------------------------------------------
+// Launch wrappers.
+// ---------------------------------------------------------------------------
 template <typename T>
-void launchMSDeformAttnFromLocationsTyped(
-    const void* value0,
-    const void* value1,
-    const void* value2,
-    const void* locations,
-    const void* weights,
-    void* output,
+cudaError_t launchMSDeformAttnFromLocations(
+    const T* value0,
+    const T* value1,
+    const T* value2,
+    const T* locations,
+    const T* weights,
+    T* output,
     int B,
     int C,
     int Q,
@@ -381,52 +384,17 @@ void launchMSDeformAttnFromLocationsTyped(
     dim3 grid(B * numHeads * Q, 1, 1);
     dim3 block(64, 1, 1);
     msDeformAttnLocationKernel<T><<<grid, block, 0, stream>>>(
-        static_cast<const T*>(value0),
-        static_cast<const T*>(value1),
-        static_cast<const T*>(value2),
-        static_cast<const T*>(locations),
-        static_cast<const T*>(weights),
-        static_cast<T*>(output),
+        value0, value1, value2, locations, weights, output,
         B, C, Q, H0, W0, H1, W1, H2, W2, numHeads);
-}
-
-void launchMSDeformAttnFromLocations(
-    const void* value0,
-    const void* value1,
-    const void* value2,
-    const void* locations,
-    const void* weights,
-    void* output,
-    int B,
-    int C,
-    int Q,
-    int H0,
-    int W0,
-    int H1,
-    int W1,
-    int H2,
-    int W2,
-    int numHeads,
-    nvinfer1::DataType dtype,
-    cudaStream_t stream)
-{
-    if (dtype == nvinfer1::DataType::kHALF) {
-        launchMSDeformAttnFromLocationsTyped<half>(
-            value0, value1, value2, locations, weights, output,
-            B, C, Q, H0, W0, H1, W1, H2, W2, numHeads, stream);
-    } else {
-        launchMSDeformAttnFromLocationsTyped<float>(
-            value0, value1, value2, locations, weights, output,
-            B, C, Q, H0, W0, H1, W1, H2, W2, numHeads, stream);
-    }
+    return lastLaunchError(__func__);
 }
 
 template <typename T>
-void launchMSDeformAttnFlatTyped(
-    const void* value,
-    const void* locations,
-    const void* weights,
-    void* output,
+cudaError_t launchMSDeformAttnFlat(
+    const T* value,
+    const T* locations,
+    const T* weights,
+    T* output,
     int B,
     int C,
     int Q,
@@ -437,45 +405,20 @@ void launchMSDeformAttnFlatTyped(
     const int threads = 256;
     const int blocks = (total + threads - 1) / threads;
     msDeformAttnFlatKernel<T><<<blocks, threads, 0, stream>>>(
-        static_cast<const T*>(value),
-        static_cast<const T*>(locations),
-        static_cast<const T*>(weights),
-        static_cast<T*>(output),
-        B,
-        C,
-        Q,
-        numHeads);
-}
-
-void launchMSDeformAttnFlat(
-    const void* value,
-    const void* locations,
-    const void* weights,
-    void* output,
-    int B,
-    int C,
-    int Q,
-    int numHeads,
-    nvinfer1::DataType dtype,
-    cudaStream_t stream)
-{
-    if (dtype == nvinfer1::DataType::kHALF) {
-        launchMSDeformAttnFlatTyped<half>(value, locations, weights, output, B, C, Q, numHeads, stream);
-    } else {
-        launchMSDeformAttnFlatTyped<float>(value, locations, weights, output, B, C, Q, numHeads, stream);
-    }
+        value, locations, weights, output, B, C, Q, numHeads);
+    return lastLaunchError(__func__);
 }
 
 template <typename TValue, typename TGrid, typename TWeight>
-void launchMSDeformAttnTyped(
-    const void* value0,
-    const void* value1,
-    const void* value2,
-    const void* grid0,
-    const void* grid1,
-    const void* grid2,
-    const void* weights,
-    void* output,
+cudaError_t launchMSDeformAttn(
+    const TValue* value0,
+    const TValue* value1,
+    const TValue* value2,
+    const TGrid* grid0,
+    const TGrid* grid1,
+    const TGrid* grid2,
+    const TWeight* weights,
+    TValue* output,
     int BH,
     int C,
     int Q,
@@ -492,78 +435,46 @@ void launchMSDeformAttnTyped(
     const int threads = 256;
     const int blocks = (total + threads - 1) / threads;
     msDeformAttnElementKernel<TValue, TGrid, TWeight><<<blocks, threads, 0, stream>>>(
-        static_cast<const TValue*>(value0),
-        static_cast<const TValue*>(value1),
-        static_cast<const TValue*>(value2),
-        static_cast<const TGrid*>(grid0),
-        static_cast<const TGrid*>(grid1),
-        static_cast<const TGrid*>(grid2),
-        static_cast<const TWeight*>(weights),
-        static_cast<TValue*>(output),
+        value0, value1, value2, grid0, grid1, grid2, weights, output,
         BH, C, Q, H0, W0, H1, W1, H2, W2, numHeads);
+    return lastLaunchError(__func__);
 }
 
-void launchMSDeformAttn(
-    const void* value0,
-    const void* value1,
-    const void* value2,
-    const void* grid0,
-    const void* grid1,
-    const void* grid2,
-    const void* weights,
-    void* output,
-    int BH,
-    int C,
-    int Q,
-    int H0,
-    int W0,
-    int H1,
-    int W1,
-    int H2,
-    int W2,
-    int numHeads,
-    nvinfer1::DataType valueDtype,
-    nvinfer1::DataType gridDtype,
-    nvinfer1::DataType weightDtype,
-    cudaStream_t stream)
-{
-    if (valueDtype == nvinfer1::DataType::kHALF) {
-        if (gridDtype == nvinfer1::DataType::kHALF && weightDtype == nvinfer1::DataType::kHALF) {
-            launchMSDeformAttnTyped<half, half, half>(
-                value0, value1, value2, grid0, grid1, grid2, weights, output,
-                BH, C, Q, H0, W0, H1, W1, H2, W2, numHeads, stream);
-        } else if (gridDtype == nvinfer1::DataType::kFLOAT && weightDtype == nvinfer1::DataType::kHALF) {
-            launchMSDeformAttnTyped<half, float, half>(
-                value0, value1, value2, grid0, grid1, grid2, weights, output,
-                BH, C, Q, H0, W0, H1, W1, H2, W2, numHeads, stream);
-        } else if (gridDtype == nvinfer1::DataType::kHALF && weightDtype == nvinfer1::DataType::kFLOAT) {
-            launchMSDeformAttnTyped<half, half, float>(
-                value0, value1, value2, grid0, grid1, grid2, weights, output,
-                BH, C, Q, H0, W0, H1, W1, H2, W2, numHeads, stream);
-        } else {
-            launchMSDeformAttnTyped<half, float, float>(
-                value0, value1, value2, grid0, grid1, grid2, weights, output,
-                BH, C, Q, H0, W0, H1, W1, H2, W2, numHeads, stream);
-        }
-    } else {
-        if (gridDtype == nvinfer1::DataType::kHALF && weightDtype == nvinfer1::DataType::kHALF) {
-            launchMSDeformAttnTyped<float, half, half>(
-                value0, value1, value2, grid0, grid1, grid2, weights, output,
-                BH, C, Q, H0, W0, H1, W1, H2, W2, numHeads, stream);
-        } else if (gridDtype == nvinfer1::DataType::kFLOAT && weightDtype == nvinfer1::DataType::kHALF) {
-            launchMSDeformAttnTyped<float, float, half>(
-                value0, value1, value2, grid0, grid1, grid2, weights, output,
-                BH, C, Q, H0, W0, H1, W1, H2, W2, numHeads, stream);
-        } else if (gridDtype == nvinfer1::DataType::kHALF && weightDtype == nvinfer1::DataType::kFLOAT) {
-            launchMSDeformAttnTyped<float, half, float>(
-                value0, value1, value2, grid0, grid1, grid2, weights, output,
-                BH, C, Q, H0, W0, H1, W1, H2, W2, numHeads, stream);
-        } else {
-            launchMSDeformAttnTyped<float, float, float>(
-                value0, value1, value2, grid0, grid1, grid2, weights, output,
-                BH, C, Q, H0, W0, H1, W1, H2, W2, numHeads, stream);
-        }
-    }
-}
+// ---------------------------------------------------------------------------
+// Explicit instantiations. The plugin dispatches on the runtime datatypes of
+// its inputs, so every fp16/fp32 combination it can select must exist here.
+// ---------------------------------------------------------------------------
+#define WW_INSTANTIATE_FROM_LOCATIONS(T)                                       \
+    template cudaError_t launchMSDeformAttnFromLocations<T>(                   \
+        const T*, const T*, const T*, const T*, const T*, T*,                  \
+        int, int, int, int, int, int, int, int, int, int, cudaStream_t)
+
+WW_INSTANTIATE_FROM_LOCATIONS(__half);
+WW_INSTANTIATE_FROM_LOCATIONS(float);
+#undef WW_INSTANTIATE_FROM_LOCATIONS
+
+#define WW_INSTANTIATE_FLAT(T)                                                 \
+    template cudaError_t launchMSDeformAttnFlat<T>(                            \
+        const T*, const T*, const T*, T*, int, int, int, int, cudaStream_t)
+
+WW_INSTANTIATE_FLAT(__half);
+WW_INSTANTIATE_FLAT(float);
+#undef WW_INSTANTIATE_FLAT
+
+#define WW_INSTANTIATE_ATTN(TV, TG, TW)                                        \
+    template cudaError_t launchMSDeformAttn<TV, TG, TW>(                       \
+        const TV*, const TV*, const TV*, const TG*, const TG*, const TG*,      \
+        const TW*, TV*, int, int, int, int, int, int, int, int, int, int,      \
+        cudaStream_t)
+
+WW_INSTANTIATE_ATTN(__half, __half, __half);
+WW_INSTANTIATE_ATTN(__half, __half, float);
+WW_INSTANTIATE_ATTN(__half, float, __half);
+WW_INSTANTIATE_ATTN(__half, float, float);
+WW_INSTANTIATE_ATTN(float, __half, __half);
+WW_INSTANTIATE_ATTN(float, __half, float);
+WW_INSTANTIATE_ATTN(float, float, __half);
+WW_INSTANTIATE_ATTN(float, float, float);
+#undef WW_INSTANTIATE_ATTN
 
 } // namespace whirlwind

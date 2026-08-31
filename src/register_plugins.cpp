@@ -1,7 +1,7 @@
-#include "corr_volume_plugin.hpp"
-#include "cost_stem_3d_plugin.hpp"
-#include "ms_deform_attn_plugin.hpp"
-#include "nv12_decode_plugin.hpp"
+#include "plugins/corr_volume/corr_volume.hpp"
+#include "plugins/cost_stem_3d/cost_stem_3d.hpp"
+#include "plugins/ms_deform_attn/ms_deform_attn.hpp"
+#include "plugins/nv12_decode/nv12_decode.hpp"
 
 #include <NvInferPlugin.h>
 

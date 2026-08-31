@@ -1,8 +1,8 @@
-#include "cost_stem_3d_plugin.hpp"
+#include "common/cuda_check.hpp"
+#include "plugins/cost_stem_3d/cost_stem_3d_kernel.hpp"
 
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
-#include <NvInfer.h>
 
 namespace whirlwind {
 
@@ -233,15 +233,15 @@ __global__ void costStem3DFusedKernel(
 }
 
 // ---------------------------------------------------------------------------
-// Dispatcher. Weights live as ONNX initializers; TRT supplies device
+// Launch wrapper. Weights live as ONNX initializers; TRT supplies device
 // pointers via the plugin's input slots, so we just forward them.
 // ---------------------------------------------------------------------------
-void launchCostStem3D(
-    const void* input,
-    void* output,
-    const void* w0, const void* b0,
-    const void* w1, const void* b1,
-    const void* w2, const void* b2,
+cudaError_t launchCostStem3D(
+    const __half* input,
+    __half* output,
+    const __half* w0, const __half* b0,
+    const __half* w1, const __half* b1,
+    const __half* w2, const __half* b2,
     int B, int D, int H, int W,
     cudaStream_t stream)
 {
@@ -256,12 +256,8 @@ void launchCostStem3D(
         4 * S1_TILE_VOL);
 
     costStem3DFusedKernel<<<grid, block, shmem, stream>>>(
-        static_cast<const __half*>(input),
-        static_cast<__half*>(output),
-        static_cast<const __half*>(w0), static_cast<const __half*>(b0),
-        static_cast<const __half*>(w1), static_cast<const __half*>(b1),
-        static_cast<const __half*>(w2), static_cast<const __half*>(b2),
-        B, D, H, W);
+        input, output, w0, b0, w1, b1, w2, b2, B, D, H, W);
+    return lastLaunchError(__func__);
 }
 
 }  // namespace whirlwind

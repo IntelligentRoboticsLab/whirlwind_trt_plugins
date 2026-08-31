@@ -1,8 +1,10 @@
-#include "nv12_decode_plugin.hpp"
+#include "common/cuda_check.hpp"
+#include "plugins/nv12_decode/nv12_decode_kernel.hpp"
 
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
-#include <NvInfer.h>
+
+#include <type_traits>
 
 namespace whirlwind {
 
@@ -186,20 +188,20 @@ __global__ void nv12DecodeKernelF16(
 }
 
 // ---------------------------------------------------------------------------
-// Dispatcher.
+// Launch wrapper.
 //
 // The TRT graph declares the input as INT8 (IPluginV3 doesn't expose UINT8),
-// but the underlying bytes are uint8 NV12 values — reinterpret the device
-// pointer as uint8_t* before launching.
+// but the underlying bytes are uint8 NV12 values — the plugin reinterprets
+// the device pointer before calling in.
 // ---------------------------------------------------------------------------
-void launchNv12Decode(
-    const void* nv12,
-    void* output,
+template <typename TOut>
+cudaError_t launchNv12Decode(
+    const uint8_t* nv12,
+    TOut* output,
     int H_IN,
     int W_IN,
     int H_OUT,
     int W_OUT,
-    nvinfer1::DataType outDtype,
     cudaStream_t stream)
 {
     dim3 block(32, 8, 1);
@@ -213,21 +215,23 @@ void launchNv12Decode(
     const float scale_uv_h = static_cast<float>(H_IN >> 1) / static_cast<float>(H_OUT);
     const float scale_uv_w = static_cast<float>(W_IN >> 1) / static_cast<float>(W_OUT);
 
-    const uint8_t* in_u8 = reinterpret_cast<const uint8_t*>(nv12);
-
-    if (outDtype == nvinfer1::DataType::kHALF) {
+    if constexpr (std::is_same_v<TOut, __half>) {
         nv12DecodeKernelF16<<<grid, block, 0, stream>>>(
-            in_u8,
-            static_cast<__half*>(output),
+            nv12, output,
             H_IN, W_IN, H_OUT, W_OUT,
             scale_y_h, scale_y_w, scale_uv_h, scale_uv_w);
     } else {
         nv12DecodeKernelF32<<<grid, block, 0, stream>>>(
-            in_u8,
-            static_cast<float*>(output),
+            nv12, output,
             H_IN, W_IN, H_OUT, W_OUT,
             scale_y_h, scale_y_w, scale_uv_h, scale_uv_w);
     }
+    return lastLaunchError(__func__);
 }
+
+template cudaError_t launchNv12Decode<__half>(
+    const uint8_t*, __half*, int, int, int, int, cudaStream_t);
+template cudaError_t launchNv12Decode<float>(
+    const uint8_t*, float*, int, int, int, int, cudaStream_t);
 
 } // namespace whirlwind

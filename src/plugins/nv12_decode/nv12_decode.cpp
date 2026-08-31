@@ -1,12 +1,13 @@
-#include "nv12_decode_plugin.hpp"
+#include "plugins/nv12_decode/nv12_decode.hpp"
+
+#include "common/dtype_dispatch.hpp"
+#include "common/plugin_fields.hpp"
+#include "plugins/nv12_decode/nv12_decode_kernel.hpp"
 
 #include <cassert>
-#include <cstring>
+#include <cstdint>
 
 namespace whirlwind {
-
-static constexpr char PLUGIN_NAME[] = "Nv12Decode";
-static constexpr char PLUGIN_VERSION[] = "1";
 
 // ---------------------------------------------------------------------------
 // Nv12DecodePlugin
@@ -17,54 +18,9 @@ Nv12DecodePlugin::Nv12DecodePlugin(int outH, int outW)
 {
 }
 
-nvinfer1::IPluginCapability* Nv12DecodePlugin::getCapabilityInterface(
-    nvinfer1::PluginCapabilityType type) noexcept
+Nv12DecodePlugin* Nv12DecodePlugin::cloneImpl() const
 {
-    switch (type) {
-        case nvinfer1::PluginCapabilityType::kCORE:
-            return static_cast<nvinfer1::IPluginV3OneCore*>(this);
-        case nvinfer1::PluginCapabilityType::kBUILD:
-            return static_cast<nvinfer1::IPluginV3OneBuild*>(this);
-        case nvinfer1::PluginCapabilityType::kRUNTIME:
-            return static_cast<nvinfer1::IPluginV3OneRuntime*>(this);
-    }
-    return nullptr;
-}
-
-nvinfer1::IPluginV3* Nv12DecodePlugin::clone() noexcept
-{
-    auto* p = new Nv12DecodePlugin(mOutH, mOutW);
-    p->setPluginNamespace(mNamespace.c_str());
-    return p;
-}
-
-nvinfer1::AsciiChar const* Nv12DecodePlugin::getPluginName() const noexcept
-{
-    return PLUGIN_NAME;
-}
-
-nvinfer1::AsciiChar const* Nv12DecodePlugin::getPluginVersion() const noexcept
-{
-    return PLUGIN_VERSION;
-}
-
-nvinfer1::AsciiChar const* Nv12DecodePlugin::getPluginNamespace() const noexcept
-{
-    return mNamespace.c_str();
-}
-
-void Nv12DecodePlugin::setPluginNamespace(const char* ns) noexcept
-{
-    mNamespace = ns ? ns : "";
-}
-
-int32_t Nv12DecodePlugin::configurePlugin(
-    nvinfer1::DynamicPluginTensorDesc const* /*in*/,
-    int32_t /*nbInputs*/,
-    nvinfer1::DynamicPluginTensorDesc const* /*out*/,
-    int32_t /*nbOutputs*/) noexcept
-{
-    return 0;
+    return new Nv12DecodePlugin(mOutH, mOutW);
 }
 
 int32_t Nv12DecodePlugin::getOutputDataTypes(
@@ -144,17 +100,18 @@ int32_t Nv12DecodePlugin::enqueue(
     const int W_IN   = dims.d[2];
     const int H_IN   = (H_NV12 * 2) / 3;
 
-    launchNv12Decode(
-        inputs[0], outputs[0],
-        H_IN, W_IN, mOutH, mOutW,
-        outputDesc[0].type, stream);
-    return 0;
-}
+    // Declared INT8, actually uint8 — see supportsFormatCombination.
+    const auto* nv12 = static_cast<const uint8_t*>(inputs[0]);
 
-nvinfer1::IPluginV3* Nv12DecodePlugin::attachToContext(
-    nvinfer1::IPluginResourceContext* /*context*/) noexcept
-{
-    return clone();
+    cudaError_t err = cudaSuccess;
+    const bool dispatched = dispatchFloatType(outputDesc[0].type, [&](auto tag) {
+        using TOut = typename decltype(tag)::type;
+        err = launchNv12Decode<TOut>(
+            nv12, static_cast<TOut*>(outputs[0]),
+            H_IN, W_IN, mOutH, mOutW, stream);
+    });
+    if (!dispatched) return 1;
+    return err == cudaSuccess ? 0 : 1;
 }
 
 nvinfer1::PluginFieldCollection const* Nv12DecodePlugin::getFieldsToSerialize() noexcept
@@ -166,9 +123,7 @@ nvinfer1::PluginFieldCollection const* Nv12DecodePlugin::getFieldsToSerialize() 
     mDataToSerialize.emplace_back(
         nvinfer1::PluginField{
             "out_w", &mOutW, nvinfer1::PluginFieldType::kINT32, 1});
-    mFCToSerialize.nbFields = static_cast<int32_t>(mDataToSerialize.size());
-    mFCToSerialize.fields = mDataToSerialize.data();
-    return &mFCToSerialize;
+    return publishSerializedFields();
 }
 
 // ---------------------------------------------------------------------------
@@ -177,57 +132,17 @@ nvinfer1::PluginFieldCollection const* Nv12DecodePlugin::getFieldsToSerialize() 
 
 Nv12DecodePluginCreator::Nv12DecodePluginCreator()
 {
-    mFields.emplace_back(
-        nvinfer1::PluginField{
-            "out_h", nullptr, nvinfer1::PluginFieldType::kINT32, 1});
-    mFields.emplace_back(
-        nvinfer1::PluginField{
-            "out_w", nullptr, nvinfer1::PluginFieldType::kINT32, 1});
-    mFC.nbFields = static_cast<int32_t>(mFields.size());
-    mFC.fields = mFields.data();
+    mFields.emplace_back(intField("out_h"));
+    mFields.emplace_back(intField("out_w"));
+    publishFields();
 }
 
-nvinfer1::AsciiChar const* Nv12DecodePluginCreator::getPluginName() const noexcept
+Nv12DecodePlugin* Nv12DecodePluginCreator::createPluginImpl(
+    nvinfer1::PluginFieldCollection const* fc) noexcept
 {
-    return PLUGIN_NAME;
-}
-
-nvinfer1::AsciiChar const* Nv12DecodePluginCreator::getPluginVersion() const noexcept
-{
-    return PLUGIN_VERSION;
-}
-
-nvinfer1::AsciiChar const* Nv12DecodePluginCreator::getPluginNamespace() const noexcept
-{
-    return mNamespace.c_str();
-}
-
-nvinfer1::PluginFieldCollection const* Nv12DecodePluginCreator::getFieldNames() noexcept
-{
-    return &mFC;
-}
-
-nvinfer1::IPluginV3* Nv12DecodePluginCreator::createPlugin(
-    nvinfer1::AsciiChar const* /*name*/,
-    nvinfer1::PluginFieldCollection const* fc,
-    nvinfer1::TensorRTPhase /*phase*/) noexcept
-{
-    int outH = 224;
-    int outW = 288;
-    if (fc != nullptr) {
-        for (int32_t i = 0; i < fc->nbFields; ++i) {
-            const auto& f = fc->fields[i];
-            if (f.data == nullptr) continue;
-            if (std::strcmp(f.name, "out_h") == 0) {
-                outH = *static_cast<const int*>(f.data);
-            } else if (std::strcmp(f.name, "out_w") == 0) {
-                outW = *static_cast<const int*>(f.data);
-            }
-        }
-    }
-    auto* p = new Nv12DecodePlugin(outH, outW);
-    p->setPluginNamespace(mNamespace.c_str());
-    return p;
+    return new Nv12DecodePlugin(
+        getIntField(fc, "out_h", 224),
+        getIntField(fc, "out_w", 288));
 }
 
 } // namespace whirlwind

@@ -1,8 +1,10 @@
-#include "corr_volume_plugin.hpp"
+#include "common/cuda_check.hpp"
+#include "plugins/corr_volume/corr_volume_kernel.hpp"
 
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
-#include <NvInfer.h>
+
+#include <type_traits>
 
 namespace whirlwind {
 
@@ -53,10 +55,10 @@ __global__ void corrVolumeKernel(
 // Naive-vec FP16 kernel — same parallelism as the naive scalar kernel but
 // loads 8 halves at a time per side via half4 (16 B per LDG.E).
 //
-// Requires C % 8 == 0. Each thread
-// still computes one (b, d, y, x), but the inner channel loop now does
-// C/8 vector loads instead of C scalar loads, cutting global-memory
-// transactions ~4x and freeing the ALU to issue HFMA2 pairs.
+// Requires C % 8 == 0. Each thread still computes one (b, d, y, x), but the
+// inner channel loop now does C/8 vector loads instead of C scalar loads,
+// cutting global-memory transactions ~4x and freeing the ALU to issue
+// HFMA2 pairs.
 // ---------------------------------------------------------------------------
 __global__ void corrVolumeKernelVec(
     const __half* __restrict__ left,
@@ -213,69 +215,64 @@ __global__ void corrVolumeRowKernel(
 }
 
 // ---------------------------------------------------------------------------
-// Dispatcher.
+// Launch wrappers.
 // ---------------------------------------------------------------------------
-void launchCorrVolume(
-    const void* left,
-    const void* right,
-    void* output,
+template <typename T>
+cudaError_t launchCorrVolume(
+    const T* left,
+    const T* right,
+    T* output,
     int B,
     int C,
     int H,
     int W,
     int D,
-    nvinfer1::DataType dtype,
     cudaStream_t stream)
 {
-    // Fast path: FP16, D == 48, W >= 64.
-    //
-    // The row-tiled kernel launches one block per (y, b) — only H*B blocks
-    // total. On wide GPUs (4090: 128 SMs) the small block count starves the
-    // SMs and the naive kernel (one thread per output, 60K+ threads) wins.
-    // We gate on W >= 64 because at that point the per-block work amortises
-    // launch overhead; below that the naive kernel is consistently faster
-    // (microbench: at W=40 row-tiled is 2.4x slower than naive on sm_89).
-    //
-    // On Orin AGX (16 SMs, lower memory BW) the trade-off may flip — keep
-    // the row-tiled kernel ready for the s05 case where W=72 already uses
-    // it, and re-tune the threshold for sm_87 if needed.
-    if (dtype == nvinfer1::DataType::kHALF && D == 48 && W >= 64) {
-        constexpr int D_TILE = 48;
+    if constexpr (std::is_same_v<T, __half>) {
+        // Fast path: FP16, D == 48, W >= 64.
+        //
+        // The row-tiled kernel launches one block per (y, b) — only H*B
+        // blocks total. On wide GPUs (4090: 128 SMs) the small block count
+        // starves the SMs and the naive kernel (one thread per output, 60K+
+        // threads) wins. We gate on W >= 64 because at that point the
+        // per-block work amortises launch overhead; below that the naive
+        // kernel is consistently faster (microbench: at W=40 row-tiled is
+        // 2.4x slower than naive on sm_89).
+        //
+        // On Orin AGX (16 SMs, lower memory BW) the trade-off may flip —
+        // keep the row-tiled kernel ready for the s05 case where W=72
+        // already uses it, and re-tune the threshold for sm_87 if needed.
+        if (D == 48 && W >= 64) {
+            constexpr int D_TILE = 48;
 
-        dim3 grid(H, B, 1);
-        dim3 block(W, 1, 1);
-        size_t shmemBytes = (W + D_TILE - 1) * sizeof(__half);
+            dim3 grid(H, B, 1);
+            dim3 block(W, 1, 1);
+            size_t shmemBytes = (W + D_TILE - 1) * sizeof(__half);
 
-        corrVolumeRowKernel<D_TILE><<<grid, block, shmemBytes, stream>>>(
-            static_cast<const __half*>(left),
-            static_cast<const __half*>(right),
-            static_cast<__half*>(output),
-            C, H, W);
-        return;
+            corrVolumeRowKernel<D_TILE><<<grid, block, shmemBytes, stream>>>(
+                left, right, output, C, H, W);
+            return lastLaunchError(__func__);
+        }
     }
 
     int total = B * D * H * W;
     int threads = 256;
     int blocks = (total + threads - 1) / threads;
 
-    if (dtype == nvinfer1::DataType::kHALF) {
-        // The __half2-vectorised variant (`corrVolumeKernelVec`) is faster
-        // in microbench but mis-aligns global loads when `x` is odd because
-        // the base address spans an odd half-stride. Re-enable it only if
-        // the layout guarantees even base addresses (e.g., NHWC with C%8==0
-        // and aligned tensors). For now use the scalar fallback.
-        corrVolumeKernel<half><<<blocks, threads, 0, stream>>>(
-            static_cast<const half*>(left),
-            static_cast<const half*>(right),
-            static_cast<half*>(output),
-            B, C, H, W, D);
-    } else {
-        corrVolumeKernel<float><<<blocks, threads, 0, stream>>>(
-            static_cast<const float*>(left),
-            static_cast<const float*>(right),
-            static_cast<float*>(output),
-            B, C, H, W, D);
-    }
+    // The __half2-vectorised variant (`corrVolumeKernelVec`) is faster in
+    // microbench but mis-aligns global loads when `x` is odd because the base
+    // address spans an odd half-stride. Re-enable it only if the layout
+    // guarantees even base addresses (e.g., NHWC with C%8==0 and aligned
+    // tensors). For now use the scalar kernel for both types.
+    corrVolumeKernel<T><<<blocks, threads, 0, stream>>>(
+        left, right, output, B, C, H, W, D);
+    return lastLaunchError(__func__);
 }
+
+template cudaError_t launchCorrVolume<__half>(
+    const __half*, const __half*, __half*, int, int, int, int, int, cudaStream_t);
+template cudaError_t launchCorrVolume<float>(
+    const float*, const float*, float*, int, int, int, int, int, cudaStream_t);
 
 } // namespace whirlwind
